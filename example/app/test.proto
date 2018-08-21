@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package app;
+
+message AppReq {
+	string hello  = 1;
+}
+
+message AppResp {
+	string msg = 1;
+}
+
+service App {
+	rpc Hello(AppReq) returns (AppResp) {}
+}
+
+
