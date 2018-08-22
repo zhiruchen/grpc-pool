@@ -2,6 +2,7 @@ package grpc_pool
 
 import (
 	"fmt"
+	"sync"
 
 	"google.golang.org/grpc"
 )
@@ -11,6 +12,7 @@ var (
 )
 
 type Pool struct {
+	mu      sync.RWMutex
 	connChs chan *grpc.ClientConn
 	df      DailFunc
 	target  string
@@ -33,11 +35,16 @@ func NewGRPCPool(df DailFunc, size int, target string, opts []grpc.DialOption) *
 }
 
 func (p *Pool) Get() (*grpc.ClientConn, error) {
+	p.mu.RLock()
+	conns := p.connChs
+	df := p.df
+	p.mu.RUnlock()
+
 	select {
-	case conn := <-p.connChs:
+	case conn := <-conns:
 		return conn, nil
 	default:
-		return p.df(p.target, p.opts...)
+		return df(p.target, p.opts...)
 	}
 }
 
@@ -45,6 +52,9 @@ func (p *Pool) Put(conn *grpc.ClientConn) error {
 	if conn == nil {
 		return fmt.Errorf("put nil conn")
 	}
+
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 
 	select {
 	case p.connChs <- conn:
@@ -55,12 +65,17 @@ func (p *Pool) Put(conn *grpc.ClientConn) error {
 }
 
 func (p *Pool) Close() {
-	if p.connChs == nil {
+	p.mu.Lock()
+	conns := p.connChs
+	p.connChs = nil
+	p.mu.Unlock()
+
+	if conns == nil {
 		return
 	}
 
-	close(p.connChs)
-	for conn := range p.connChs {
+	close(conns)
+	for conn := range conns {
 		conn.Close()
 	}
 }
